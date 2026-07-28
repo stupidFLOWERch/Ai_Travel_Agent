@@ -4,21 +4,18 @@ import serpapi
 from enum import Enum
 from dotenv import load_dotenv
 
-
 load_dotenv()
 
 SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY")
 
 client = serpapi.Client(
-    api_key=SERPAPI_API_KEY
+api_key=SERPAPI_API_KEY
 )
-
 
 class FlightType(str, Enum):
     ROUND_TRIP = "round_trip"
     ONE_WAY = "one_way"
     MULTI_CITY = "multi_city"
-
 
 class TravelClass(str, Enum):
     ECONOMY = "economy"
@@ -26,21 +23,60 @@ class TravelClass(str, Enum):
     BUSINESS = "business"
     FIRST = "first"
 
-
 travel_class_map = {
     "economy": 1,
     "premium_economy": 2,
     "business": 3,
-    "first": 4
-}
-
+    "first": 4,
+    }
 
 flight_type_map = {
     "round_trip": 1,
     "one_way": 2,
     "multi_city": 3,
-}
+    }
 
+def _extract_flight_data(flight):
+    """
+    Extract the relevant flight information from a SerpApi flight result.
+    """
+    
+    legs = flight["flights"]
+
+    first_leg = legs[0]
+    last_leg = legs[-1]
+
+    return {
+        "airline": first_leg["airline"],
+        "flight_numbers": [
+            leg["flight_number"]
+            for leg in legs
+        ],
+        "departure": first_leg["departure_airport"]["name"],
+        "departure_time": first_leg["departure_airport"]["time"],
+        "arrival": last_leg["arrival_airport"]["name"],
+        "arrival_time": last_leg["arrival_airport"]["time"],
+        "duration_minutes": flight["total_duration"],
+        "price": flight["price"],
+        "travel_class": first_leg["travel_class"],
+    }
+    
+
+def _get_flights(results):
+    """
+    Get flight results from SerpApi.
+
+    Prefer best_flights.
+    If unavailable, fall back to other_flights.
+    """
+
+    flights = results.get("best_flights", [])
+
+    if not flights:
+        flights = results.get("other_flights", [])
+
+    return flights
+    
 
 def search_flights(
     departure_id: str,
@@ -50,11 +86,12 @@ def search_flights(
     currency: str | None = None,
     travel_class: TravelClass | None = None,
     return_date: str | None = None,
-    bags: int | None = None
-):
+    bags: int | None = None,
+    ):
     """
     Search Google Flights using SerpApi.
 
+    
     Args:
         departure_id:
             IATA airport code for departure airport.
@@ -93,60 +130,249 @@ def search_flights(
 
         bags:
             Number of checked bags.
+
+    Returns:
+        A list of flight results.
+
+        One-way example:
+
+        [
+            {
+                "airline": "Batik Air",
+                "flight_numbers": ["OD 1907"],
+                "departure": "Sibu Airport",
+                "departure_time": "2026-08-24 17:20",
+                "arrival": "Kuala Lumpur International Airport",
+                "arrival_time": "2026-08-24 19:30",
+                "duration_minutes": 130,
+                "price": 559,
+                "travel_class": "Economy"
+            }
+        ]
+
+        Round-trip example:
+
+        [
+            {
+                "outbound": {
+                    ...
+                },
+                "return": [
+                    {
+                        ...
+                    }
+                ]
+            }
+        ]
     """
+
+    print(
+        f"[TOOL] search_flights("
+        f"{departure_id} -> {arrival_id}, "
+        f"{outbound_date})"
+    )
+
+    print(f"[DEBUG] return_date = {return_date}")
+    print(f"[DEBUG] original flight_type = {flight_type}")
+
+    # ---------------------------------------------------------
+    # 1. Determine the actual flight type
+    # ---------------------------------------------------------
+
+    # If return_date is provided, treat the search as round trip.
+    if return_date is not None:
+        flight_type = FlightType.ROUND_TRIP
+
+    # If no flight type is provided and there is no return date,
+    # default to one-way.
+    elif flight_type is None:
+        flight_type = FlightType.ONE_WAY
+
+    # If the user explicitly requested round trip but did not
+    # provide a return date, reject the request.
+    if (
+        flight_type == FlightType.ROUND_TRIP
+        and return_date is None
+    ):
+        raise ValueError(
+            "return_date is required for round-trip flights."
+        )
+
+    print(f"[DEBUG] final flight_type = {flight_type}")
+    print(
+        f"[DEBUG] SerpApi type = "
+        f"{flight_type_map[flight_type.value]}"
+    )
+
+    # ---------------------------------------------------------
+    # 2. Build the initial SerpApi request parameters
+    # ---------------------------------------------------------
 
     params = {
         "engine": "google_flights",
         "departure_id": departure_id,
         "arrival_id": arrival_id,
         "outbound_date": outbound_date,
+        "type": flight_type_map[flight_type.value],
+        "currency": currency if currency is not None else "MYR",
     }
 
-    # Flight type
-    if flight_type is not None:
-        params["type"] = flight_type_map[flight_type.value]
-
-    # Return date
+    # Add return date for round-trip searches.
     if return_date is not None:
         params["return_date"] = return_date
 
-    # Currency
-    if currency is not None:
-        params["currency"] = currency
-    else:
-        params["currency"] = "MYR"
-
-    # Travel class
+    # Add travel class if provided.
     if travel_class is not None:
-        params["travel_class"] = travel_class_map[travel_class.value]
+        params["travel_class"] = travel_class_map[
+            travel_class.value
+        ]
 
-    # Number of bags
+    # Add checked baggage count if provided.
     if bags is not None:
         params["bags"] = bags
 
-    results = client.search(params)
+    print(f"[DEBUG] Initial API params = {params}")
 
-    flights = results.get("best_flights", [])
+    # ---------------------------------------------------------
+    # 3. First API call
+    # ---------------------------------------------------------
 
-    if not flights:
-        flights = results.get("other_flights", [])
+    outbound_results = client.search(params)
+
+    print(
+        f"[DEBUG] First API call completed. "
+        f"Result keys = {outbound_results.keys()}"
+    )
+
+    outbound_flights = _get_flights(outbound_results)
+
+    if not outbound_flights:
+        print("[DEBUG] No outbound flights found.")
+        return []
+
+    # ---------------------------------------------------------
+    # 4. Process outbound flights
+    # ---------------------------------------------------------
 
     flight_results = []
 
-    for flight in flights:
+    for outbound_flight in outbound_flights:
 
-        first_leg = flight["flights"][0]
+        outbound_data = _extract_flight_data(
+            outbound_flight
+        )
 
-        flight_results.append({
-            "airline": first_leg["airline"],
-            "flight_number": first_leg["flight_number"],
-            "departure": first_leg["departure_airport"]["name"],
-            "departure_time": first_leg["departure_airport"]["time"],
-            "arrival": first_leg["arrival_airport"]["name"],
-            "arrival_time": first_leg["arrival_airport"]["time"],
-            "duration_minutes": flight["total_duration"],
-            "price": flight["price"],
-            "travel_class": first_leg["travel_class"]
-        })
+        # -----------------------------------------------------
+        # 5. Round-trip handling
+        # -----------------------------------------------------
+
+        if flight_type == FlightType.ROUND_TRIP:
+
+            print("[DEBUG] ROUND TRIP detected.")
+
+            # Get the token associated with this specific
+            # outbound flight.
+            departure_token = outbound_flight.get(
+                "departure_token"
+            )
+
+            print(
+                f"[DEBUG] departure_token = "
+                f"{departure_token}"
+            )
+
+            if not departure_token:
+                print(
+                    "[DEBUG] No departure_token found "
+                    "for this outbound flight."
+                )
+                continue
+
+            # -------------------------------------------------
+            # 6. Second API call
+            # -------------------------------------------------
+            #
+            # Keep all original search parameters and add
+            # departure_token to select this specific
+            # outbound flight.
+            #
+            # Do NOT modify the original params directly.
+            # Use a copy instead.
+            # -------------------------------------------------
+
+            return_params = params.copy()
+
+            return_params["departure_token"] = (
+                departure_token
+            )
+
+            print(
+                f"[DEBUG] Second API params = "
+                f"{return_params}"
+            )
+
+            return_results = client.search(
+                return_params
+            )
+
+            print(
+                "[DEBUG] Return API call completed."
+            )
+
+            print(
+                f"[DEBUG] Return result keys = "
+                f"{return_results.keys()}"
+            )
+
+            # -------------------------------------------------
+            # 7. Extract return flight options
+            # -------------------------------------------------
+
+            return_flights = _get_flights(
+                return_results
+            )
+
+            return_options = []
+
+            for return_flight in return_flights:
+
+                return_data = _extract_flight_data(
+                    return_flight
+                )
+
+                return_options.append(
+                    return_data
+                )
+
+            # -------------------------------------------------
+            # 8. Combine outbound + return
+            # -------------------------------------------------
+
+            flight_results.append(
+                {
+                    "outbound": outbound_data,
+                    "return": return_options,
+                }
+            )
+
+        # -----------------------------------------------------
+        # 9. One-way / other flight types
+        # -----------------------------------------------------
+
+        else:
+
+            flight_results.append(
+                outbound_data
+            )
+
+    # ---------------------------------------------------------
+    # 10. Return final results
+    # ---------------------------------------------------------
+
+    print(
+        f"[DEBUG] Total flight results = "
+        f"{len(flight_results)}"
+    )
 
     return flight_results
+    

@@ -1,78 +1,45 @@
-def main():
+import os
+import requests
+from dotenv import load_dotenv
 
-    user_input = input("You: ")
+load_dotenv()
 
-    # First request
-    response = client.models.generate_content(
-        model="gemini-3.1-flash-lite",
-        contents=user_input,
-        config=config
+RAPIDAPI_KEY  = os.getenv("RAPIDAPI_KEY")
+
+
+def search_airport(location: str):
+    """
+    Search for airports using AeroDataBox.
+
+    Args:
+        location:
+            City name, airport name, or airport keyword.
+            Example: "Japan", "Sibu", "Kuala Lumpur"
+
+    Returns:
+        A list of matching airports.
+    """
+    print(f"[TOOL] search_airport({location})")
+
+    url = "https://aerodatabox.p.rapidapi.com/airports/search/term"
+
+    headers = {
+        "Content-Type": "application/json",
+        "x-rapidapi-host": "aerodatabox.p.rapidapi.com",
+        "x-rapidapi-key": RAPIDAPI_KEY
+    }
+
+    params = {
+        "q": location,
+        "limit": 10
+    }
+
+    response = requests.get(
+        url,
+        headers=headers,
+        params=params
     )
 
-    # Tool calling loop
-    while response.function_calls:
+    response.raise_for_status()
 
-        print("\nAgent is using a tool...")
-
-        tool_results = []
-
-        for function_call in response.function_calls:
-
-            function_name = function_call.name
-            function_args = function_call.args
-
-            print(
-                f"Calling tool: {function_name}"
-            )
-
-            print(
-                f"Arguments: {function_args}"
-            )
-
-            # Find the corresponding Python function
-            tool_function = available_tools.get(function_name)
-
-            if tool_function is None:
-                raise ValueError(
-                    f"Unknown tool: {function_name}"
-                )
-
-            # Execute the Python function
-            result = tool_function(
-                **function_args
-            )
-
-            print(
-                f"Tool result: {result}"
-            )
-
-            # Store tool result
-            tool_results.append(
-                types.Part.from_function_response(
-                    name=function_name,
-                    response={
-                        "result": result
-                    }
-                )
-            )
-
-        # Send tool results back to Gemini
-        response = client.models.generate_content(
-            model="gemini-3.1-flash-lite",
-            contents=[
-                response.candidates[0].content,
-                types.Content(
-                    role="user",
-                    parts=tool_results
-                )
-            ],
-            config=config
-        )
-
-    # Final response
-    print("\nAgent:")
-    print(response.text)
-
-
-if __name__ == "__main__":
-    main()
+    return response.json()
