@@ -40,261 +40,106 @@ def search_multi_city(
 ):
     """
     Search multi-city flights using SerpApi.
-
-    Args:
-        segments:
-            List of flight segments.
-
-            Example:
-
-            [
-                {
-                    "departure_id": "KUL",
-                    "arrival_id": "NRT",
-                    "date": "2026-08-05"
-                },
-                {
-                    "departure_id": "NRT",
-                    "arrival_id": "LAX",
-                    "date": "2026-08-12"
-                },
-                {
-                    "departure_id": "LAX",
-                    "arrival_id": "AUS",
-                    "date": "2026-08-19"
-                }
-            ]
-
-        currency:
-            Currency used for displaying flight prices.
-            Example: "MYR", "USD"
-
-        travel_class:
-            Travel class.
-            Allowed values:
-            - "economy"
-            - "premium_economy"
-            - "business"
-            - "first"
-
-        bags:
-            Number of checked bags.
-
-    Returns:
-        A list of multi-city itinerary results.
     """
-
     if not segments:
-        raise ValueError(
-            "At least one segment is required."
-        )
+        raise ValueError("At least one segment is required.")
 
-    print(
-        f"[TOOL] search_multi_city("
-        f"{len(segments)} segments)"
-    )
-
-    # ---------------------------------------------------------
-    # 1. Convert segments into SerpApi multi_city_json format
-    # ---------------------------------------------------------
+    print(f"[TOOL] search_multi_city({len(segments)} segments)")
 
     multi_city_json = json.dumps(segments)
 
     params = {
         "engine": "google_flights",
         "type": "3",
-        "currency": (
-            currency
-            if currency is not None
-            else "MYR"
-        ),
+        "currency": currency if currency is not None else "MYR",
         "multi_city_json": multi_city_json,
     }
 
-    # Add travel class if provided.
     if travel_class is not None:
-        params["travel_class"] = (
-            travel_class_map[
-                travel_class.value
-            ]
-        )
+        params["travel_class"] = travel_class_map[travel_class.value]
 
-    # Add checked baggage count if provided.
     if bags is not None:
         params["bags"] = bags
 
-    print(
-        f"[DEBUG] Initial API params = {params}"
-    )
-
-    # ---------------------------------------------------------
-    # 2. First API call
-    # ---------------------------------------------------------
+    print(f"[DEBUG] Initial API params = {params}")
 
     results = client.search(params)
-
-    print(
-        "[DEBUG] First multi-city API call completed."
-    )
-
-    print(
-        f"[DEBUG] Result keys = {results.keys()}"
-    )
+    print("[DEBUG] First multi-city API call completed.")
 
     current_flights = get_flights(results)
 
     if not current_flights:
-        print(
-            "[DEBUG] No multi-city flights found."
-        )
+        print("[DEBUG] No multi-city flights found.")
         return []
 
-    # ---------------------------------------------------------
-    # 3. Store final itinerary results
-    # ---------------------------------------------------------
+    # 🔥 第一航段按价格排序，取最便宜的
+    current_flights.sort(key=lambda x: x.get("price", 999999))
+    MAX_FIRST_FLIGHTS = 3
+    current_flights = current_flights[:MAX_FIRST_FLIGHTS]
+    print(f"[DEBUG] Limited to {len(current_flights)} cheapest first flights")
 
     itinerary_results = []
 
-    # ---------------------------------------------------------
-    # 4. Process each possible first segment flight
-    # ---------------------------------------------------------
-
     for first_flight in current_flights:
-
         selected_segments = []
+        first_segment_data = extract_flight_data(first_flight, include_price=False)
+        selected_segments.append(first_segment_data)
 
-        # Extract the first segment.
-        first_segment_data = extract_flight_data(
-            first_flight,
-            include_price=False,
-        )
-
-        selected_segments.append(
-            first_segment_data
-        )
-
-        # Get the current total price.
-        total_price = first_flight.get(
-            "price",
-            0,
-        )
-
-        # Keep track of the current flight.
-        # Its departure_token is needed to get the next segment.
+        total_price = first_flight.get("price", 0)
         current_flight = first_flight
+        is_complete = True
 
-        # -----------------------------------------------------
-        # 5. Get remaining segments using departure_token
-        # -----------------------------------------------------
-
-        for segment_index in range(
-            1,
-            len(segments),
-        ):
-
-            departure_token = current_flight.get(
-                "departure_token"
-            )
-
-            print(
-                f"[DEBUG] Segment "
-                f"{segment_index + 1}: "
-                f"departure_token = "
-                f"{departure_token}"
-            )
-
+        for segment_index in range(1, len(segments)):
+            departure_token = current_flight.get("departure_token")
             if not departure_token:
-                print(
-                    "[DEBUG] No departure_token "
-                    "found. Cannot retrieve "
-                    "next segment."
-                )
+                print("[DEBUG] No departure_token found.")
+                is_complete = False
                 break
-
-            # -------------------------------------------------
-            # 6. Request the next segment
-            # -------------------------------------------------
 
             next_params = params.copy()
+            next_params["departure_token"] = departure_token
 
-            next_params[
-                "departure_token"
-            ] = departure_token
+            print(f"[DEBUG] Next segment API params = {next_params}")
+            next_results = client.search(next_params)
+            print("[DEBUG] Next segment API call completed.")
 
-            print(
-                f"[DEBUG] Next segment API params = "
-                f"{next_params}"
-            )
-
-            next_results = client.search(
-                next_params
-            )
-
-            print(
-                "[DEBUG] Next segment API call "
-                "completed."
-            )
-
-            print(
-                f"[DEBUG] Next result keys = "
-                f"{next_results.keys()}"
-            )
-
-            next_flights = get_flights(
-                next_results
-            )
+            next_flights = get_flights(next_results)
 
             if not next_flights:
-                print(
-                    "[DEBUG] No flights found "
-                    "for next segment."
-                )
+                print("[DEBUG] No flights found for next segment.")
+                is_complete = False
                 break
 
-            # -------------------------------------------------
-            # 7. Select the first available flight
-            # -------------------------------------------------
+            # 🔥 按价格排序，取最便宜的 2 个
+            next_flights.sort(key=lambda x: x.get("price", 999999))
+            MAX_FLIGHTS_PER_SEGMENT = 2
+            next_flights = next_flights[:MAX_FLIGHTS_PER_SEGMENT]
+            print(f"[DEBUG] Limited to {len(next_flights)} cheapest flights for segment {segment_index + 1}")
 
+            # 🔥 取最便宜的那个
             next_flight = next_flights[0]
 
-            next_segment_data = extract_flight_data(
-                next_flight,
-                include_price=False,
-            )
+            next_segment_data = extract_flight_data(next_flight, include_price=False)
+            selected_segments.append(next_segment_data)
 
-            selected_segments.append(
-                next_segment_data
-            )
-
-            # Update total price.
             if "price" in next_flight:
                 total_price = next_flight["price"]
 
-            # Update current flight.
-            # The departure_token from this flight will be used to retrieve the next segment.
             current_flight = next_flight
 
-        # -----------------------------------------------------
-        # 8. Only add complete itineraries
-        # -----------------------------------------------------
+        if is_complete and len(selected_segments) == len(segments):
+            itinerary_results.append({
+                "segments": selected_segments,
+                "total_price": total_price,
+            })
 
-        if len(selected_segments) == len(
-            segments
-        ):
-            itinerary_results.append(
-                {
-                    "segments": selected_segments,
-                    "total_price": total_price,
-                }
-            )
+            # 🔥 找到 3 个就停止
+            if len(itinerary_results) >= 3:
+                print("[DEBUG] Reached 3 complete itineraries, stopping")
+                break
 
-    # ---------------------------------------------------------
-    # 9. Return final results
-    # ---------------------------------------------------------
+    # 🔥 按总价排序
+    itinerary_results.sort(key=lambda x: x.get("total_price", 999999))
 
-    print(
-        f"[DEBUG] Total multi-city itineraries = "
-        f"{len(itinerary_results)}"
-    )
-
+    print(f"[DEBUG] Total multi-city itineraries = {len(itinerary_results)}")
     return itinerary_results

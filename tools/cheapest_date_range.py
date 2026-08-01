@@ -184,8 +184,7 @@ def search_cheapest_round_trip(
     travel_class: TravelClass | None = None,
     bags: int | None = None
 ):
-   
-    
+
     cheapest = None
     cheapest_outbound_date = None
     cheapest_return_date = None
