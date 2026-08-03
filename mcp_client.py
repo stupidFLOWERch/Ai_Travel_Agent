@@ -1,5 +1,3 @@
-# chatbot.py - 修复版
-
 import asyncio
 import json
 import os
@@ -21,7 +19,7 @@ class MCPChatbot:
         self.chat = None
     
     def clean_schema(self, schema: dict) -> dict:
-        """清理 JSON Schema，移除 Gemini 不支持的字段"""
+        """Clean JSON Schema, remove unsupported fields in Gemini """
         unsupported_fields = [
             "$schema",
             "additional_properties",
@@ -64,7 +62,7 @@ class MCPChatbot:
         return cleaned
     
     async def connect_mcp(self):
-        """连接到 MCP Server"""
+        """Connect to MCP Server"""
         server_params = StdioServerParameters(
             command="python",
             args=["mcp_server.py"]
@@ -122,10 +120,43 @@ class MCPChatbot:
                 "system_instruction": """
                 You are a helpful travel assistant. You have access to flight search tools.
                 
+                Available tools
+                1. **search_flights_tool** - Search flights on a specific date
+                2. **cheapest_date_range_tool** - Find cheapest flights within a date range
+                3. **analyze_price_insights_tool** - Analyze if a flight price is good to buy
+                4. **search_airport_tool** - Find airport IATA codes
+                5. **search_multi_city_tool** - Search multi-city flights
+
                 When a user asks about flights:
-                1. Understand the user's intent
-                2. Call the appropriate tool
-                3. Use natural language to format the result and reply to the user
+                1. **FIRST** call search_flights_tool or cheapest_date_range_tool to get flight options
+                2. **THEN** if the user asks about price value, call price_advisor_tool
+
+                Do NOT call price_advisor_tool before searching for flights.
+                
+                Call this when the user asks about price value:
+                - "Is this a good price?"
+                - "Is it worth it?"
+                - "Should I buy now or wait?"
+                - Any question about whether to purchase
+
+                ## How to Use price_advisor_tool Results
+
+                The tool returns:
+                - **advice**: Complete recommendation - USE THIS DIRECTLY in your response
+                - **price_level**: cheap / typical / expensive - tells you if it's a good deal
+                - **trend**: rising / falling / stable - tells you where prices are heading
+                - **trend_summary**: Human-readable trend description
+                - **typical_range**: Normal price range [min, max]
+
+                ## Response Rules
+
+                1. Use the "advice" field directly - it already contains the full recommendation
+                2. Mention the trend if available (e.g., "prices are dropping")
+                3. Compare current price to the typical range
+                4. Never show raw JSON
+
+
+                Always use natural language to format the result and reply to the user
                 """,
                 "tools": self.tools_definitions
             }
@@ -147,14 +178,14 @@ class MCPChatbot:
             try:
                 response = self.chat.send_message(user_input)
                 
-                # 🔥 改动 1: 用 while 循环持续处理，直到 Gemini 不再调用工具
+                # Use while loop to call tools
                 while True:
                     if not response.candidates or not response.candidates[0].content.parts:
                         break
                     
                     has_function_call = False
                     
-                    # 🔥 改动 2: 遍历所有 parts，处理每个 function_call
+                    # loop all parts, handle all function calls
                     for part in response.candidates[0].content.parts:
                         if part.function_call:
                             has_function_call = True
@@ -167,21 +198,21 @@ class MCPChatbot:
                             result = await self.call_tool(tool_name, tool_args)
                             
                             print(f"✅ Tool execution completed")
-                            
+                            # print(f"📊 Result: {json.dumps(result, indent=2, ensure_ascii=False)}")  # 🔥 添加这行
                             response_part = types.Part.from_function_response(
                                 name=tool_name,
                                 response={"result": result}
                             )
                             
-                            # 把工具结果发回给 Gemini，获取新的响应
+                            # send result after tools call to llm
                             response = self.chat.send_message(response_part)
-                            break  # 处理完一个 function_call 后，重新检查响应
+                            break  
                     
-                    # 🔥 改动 3: 如果没有 function_call，退出循环
+                    # exit loop when function call end
                     if not has_function_call:
                         break
                 
-                # 🔥 改动 4: 提取所有文本
+                # get all text response
                 text_parts = []
                 if response.candidates and response.candidates[0].content.parts:
                     for part in response.candidates[0].content.parts:
