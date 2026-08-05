@@ -3,6 +3,7 @@ import os
 import json
 import asyncio
 import logging
+import requests
 
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
@@ -242,6 +243,65 @@ async def search_hotels_tool(
         default=str
     )
 
+async def _async_get_weather(
+    latitude: float,
+    longitude: float,
+    forecast_days: int = 3
+):
+      """
+    Internal async helper: fetch weather data directly from Open-Meteo REST API.
+    
+    Note: Open-Meteo provides a free public REST API (no API key required).
+    Call it directly instead of going through the MCP layer to keep it simple.
+    """
+    try:        
+        url = "https://api.open-meteo.com/v1/forecast"
+        params = {
+            "latitude": latitude,
+            "longitude": longitude,
+            "current": ["temperature_2m", "relative_humidity_2m", "weather_code"],
+            "daily": ["temperature_2m_max", "temperature_2m_min"],
+            "forecast_days": forecast_days,
+            "timezone": "auto"
+        }
+        
+        response = requests.get(url, params=params, timeout=10)
+        response.raise_for_status()
+        return response.json()
+        
+    except Exception as e:
+        logging.error(f"Weather API call failed: {e}", exc_info=True)
+        return {"error": str(e)}
+
+
+@mcp.tool()
+async def get_weather_tool(
+    latitude: float,
+    longitude: float,
+    forecast_days: int = 3
+) -> str:
+    """
+    Get weather forecast for a location (supports up to 16 days).
+
+    Args:
+        latitude: Latitude in decimal degrees (e.g., 2.3)
+        longitude: Longitude in decimal degrees (e.g., 111.82)
+        forecast_days: Number of forecast days (default: 3, max: 16)
+    """
+    result = await _async_get_weather(latitude, longitude, forecast_days)
+    
+    if isinstance(result, dict) and "error" in result:
+        return json.dumps(result, indent=2, ensure_ascii=False)
+    
+    # Simplify response — keep only what the LLM needs
+    simplified = {
+        "location": {"latitude": latitude, "longitude": longitude},
+        "current": result.get("current", {}),
+        "daily": result.get("daily", {}),
+        "forecast_days": forecast_days
+    }
+    
+    return json.dumps(simplified, indent=2, ensure_ascii=False, default=str)
 
 if __name__ == "__main__":
     mcp.run()

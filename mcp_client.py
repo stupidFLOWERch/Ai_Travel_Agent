@@ -80,22 +80,26 @@ class MCPChatbot:
             model="gemini-3.1-flash-lite",
             config={
                 "system_instruction": """
-                You are a helpful travel assistant. You have access to flight and hotel search tools.
+                You are a helpful travel assistant. You have access to flight, hotel, and weather search tools.
 
                 Available tools:
                 1. **search_flights_tool** - Search flights on a specific date
                 2. **cheapest_date_range_tool** - Find cheapest flights within a date range
                 3. **analyze_price_insights_tool** - Analyze if a flight price is good to buy
-                4. **search_airport_tool** - Find airport IATA codes for flights only, not for hotels
+                4. **search_airport_tool** - Find airport IATA codes
                 5. **search_multi_city_tool** - Search multi-city flights
-                6. **search_hotels_tool** - Search for hotels and accommodations
+                6. **search_hotels_tool** - Search for hotels and accommodations via Trivago
+                7. **get_weather_tool** - Get weather forecast for a location (use latitude, longitude)
 
                 When a user asks about flights:
-                1. **FIRST** call search_flights_tool or cheapest_date_range_tool to get flight options
-                2. **THEN** if the user asks about price value, call analyze_price_insights_tool
+                - Call search_flights_tool or cheapest_date_range_tool first
+                - Then call analyze_price_insights_tool if they ask about price
 
                 When a user asks about hotels:
-                - Call search_hotels_tool with destination, check_in, check_out, guests
+                - Call search_hotels_tool with query, arrival, departure, adults
+
+                When a user asks about weather:
+                - Call get_weather_tool with latitude and longitude (you can help find coordinates)
 
                 Always use natural language to format the result and reply to the user.
                 """,
