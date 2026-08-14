@@ -224,7 +224,7 @@ async def search_hotels_tool(
     query: str,
     arrival: str,
     departure: str,
-    adults: int = 2,
+    adults: int = 1,
     currency: str = "MYR"
 ) -> str:
     """Search for hotels and accommodations via Trivago."""
@@ -248,13 +248,13 @@ async def _async_get_weather(
     longitude: float,
     forecast_days: int = 3
 ):
-      """
+    """
     Internal async helper: fetch weather data directly from Open-Meteo REST API.
     
     Note: Open-Meteo provides a free public REST API (no API key required).
     Call it directly instead of going through the MCP layer to keep it simple.
     """
-    try:        
+    try:    
         url = "https://api.open-meteo.com/v1/forecast"
         params = {
             "latitude": latitude,
