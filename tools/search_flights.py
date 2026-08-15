@@ -1,5 +1,6 @@
 import os
 import serpapi
+import sys
 
 from enum import Enum
 from dotenv import load_dotenv
@@ -12,10 +13,18 @@ load_dotenv()
 
 SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY")
 
+# Debug: Verify that the SerpApi API key is available when this module
+# is initialized. This helps diagnose environment variable issues,
+# especially when the MCP server is running as a subprocess.
+# print(
+#     f"[DEBUG] SERPAPI KEY exists={bool(SERPAPI_API_KEY)}, "
+#     f"length={len(SERPAPI_API_KEY) if SERPAPI_API_KEY else 0}",
+#     file=sys.stderr
+# )
+
 client = serpapi.Client(
     api_key=SERPAPI_API_KEY
 )
-
 
 class FlightType(str, Enum):
     ROUND_TRIP = "round_trip"
@@ -72,7 +81,18 @@ def search_flights(
     Returns:
         A list of flight results with currency information included.
     """
+    # Debug: Verify that the API key is still available at runtime.
+    # This confirms that the MCP server subprocess has access to the environment variables passed from the MCP client.
+    # print(
+    #     f"[DEBUG] Runtime key exists={bool(os.getenv('SERPAPI_API_KEY'))}, "
+    #     f"length={len(os.getenv('SERPAPI_API_KEY', ''))}",
+    #     file=sys.stderr
+    # )
 
+    print(
+        f"[DEBUG] Client type={type(client)}",
+        file=sys.stderr
+    )
     print(
         f"[TOOL] search_flights("
         f"{departure_id} -> {arrival_id}, "

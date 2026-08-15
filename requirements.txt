@@ -1,0 +1,9 @@
+asyncio
+fastmcp==3.4.5
+mcp==1.29.0
+google-genai==2.14.0
+langgraph==1.2.11
+langgraph-checkpoint==4.2.0
+serpapi==1.0.2
+python-dotenv==1.2.2
+requests==2.34.2

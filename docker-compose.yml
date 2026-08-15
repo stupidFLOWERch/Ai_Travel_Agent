@@ -1,0 +1,12 @@
+services:
+  travel-agent:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      
+    container_name: travel-agent
+
+    env_file:
+      - .env
+    stdin_open: true
+    tty: true

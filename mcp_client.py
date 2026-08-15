@@ -1,6 +1,7 @@
 import asyncio
 import json
 import os
+import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 from google import genai
@@ -14,6 +15,14 @@ from typing import TypedDict, List, Dict, Any
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
+# Debug: verify that the SerpApi API key is available in the MCP client.
+# This helps diagnose environment variable propagation issues between the Docker container, MCP client, and MCP server subprocess.
+# print(
+#     "[CLIENT] SERPAPI:",
+#     bool(os.getenv("SERPAPI_API_KEY")),
+#     len(os.getenv("SERPAPI_API_KEY", "")),
+#     file=sys.stderr
+# )
 
 # ==========================================
 # Agent State Definition
@@ -114,22 +123,44 @@ class MCPLangGraphAgent:
             print(f"📝 Final Parameters: {json.dumps(args, indent=2, ensure_ascii=False)}")
 
             result = await self.mcp_session.call_tool(tool_name, args)
+            print("\n========== RAW MCP RESULT ==========")
+            print(result)
+            print("====================================\n")
 
-            # Extract text from result content
             for content in result.content:
+                print(f"Content type: {content.type}")
+
                 if content.type == "text":
+                    print("Content text:")
+                    print(content.text)
+
                     try:
-                        return json.loads(content.text)
-                    except:
+                        parsed = json.loads(content.text)
+
+                        print("\n========== PARSED RESULT ==========")
+                        print(json.dumps(
+                            parsed,
+                            indent=2,
+                            ensure_ascii=False
+                        ))
+                        print("===================================\n")
+
+                        return parsed
+
+                    except Exception:
                         return content.text
 
             return {"error": "No content returned"}
 
         except Exception as e:
-            print(f"❌ TOOL ERROR: {e}")
+            print(f"\n❌ TOOL ERROR: {type(e).__name__}: {e}")
+
             import traceback
             traceback.print_exc()
-            return {"error": str(e)}
+
+            return {
+                "error": f"{type(e).__name__}: {str(e)}"
+        }
 
     # ------------------------------------------
     # LangGraph Node 1: LLM Decision
@@ -172,7 +203,7 @@ class MCPLangGraphAgent:
             elif role == "tool":
                 # Tool result → function_response
                 messages.append(types.Content(
-                    role="model",
+                    role="user",
                     parts=[types.Part(
                         function_response=types.FunctionResponse(
                             name=msg.get("name", "unknown"),
@@ -337,9 +368,13 @@ class MCPLangGraphAgent:
         Main entry point: connect to MCP, build graph, start chat loop.
         """
         # Connect to MCP Server
+        # Pass the current process environment to the MCP server subprocess.
+        # This ensures that environment variables such as API keys are available
+        # inside the MCP server when running locally or inside Docker.
         server_params = StdioServerParameters(
             command="python",
-            args=["mcp_server.py"]
+            args=["mcp_server.py"],
+            env=os.environ.copy()
         )
         print("🔄 Connecting to MCP Server...")
 
