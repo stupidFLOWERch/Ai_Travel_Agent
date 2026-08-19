@@ -123,27 +123,31 @@ class MCPLangGraphAgent:
             print(f"📝 Final Parameters: {json.dumps(args, indent=2, ensure_ascii=False)}")
 
             result = await self.mcp_session.call_tool(tool_name, args)
-            print("\n========== RAW MCP RESULT ==========")
-            print(result)
-            print("====================================\n")
+            
+            # DEBUG: print raw MCP result
+            # print("\n========== RAW MCP RESULT ==========")
+            # print(result)
+            # print("====================================\n")
 
             for content in result.content:
-                print(f"Content type: {content.type}")
+                # DEBUG: print content type and text
+                # print(f"Content type: {content.type}")
+                # if content.type == "text":
+                #     print("Content text:")
+                #     print(content.text)
 
                 if content.type == "text":
-                    print("Content text:")
-                    print(content.text)
-
                     try:
                         parsed = json.loads(content.text)
 
-                        print("\n========== PARSED RESULT ==========")
-                        print(json.dumps(
-                            parsed,
-                            indent=2,
-                            ensure_ascii=False
-                        ))
-                        print("===================================\n")
+                        # DEBUG: print parsed result
+                        # print("\n========== PARSED RESULT ==========")
+                        # print(json.dumps(
+                        #     parsed,
+                        #     indent=2,
+                        #     ensure_ascii=False
+                        # ))
+                        # print("===================================\n")
 
                         return parsed
 

@@ -1,12 +1,34 @@
 services:
-  travel-agent:
+  mcp-server:
     build:
       context: .
       dockerfile: Dockerfile
-      
-    container_name: travel-agent
+
+    container_name: travel-mcp-server
+
+    # Run the existing server object over Streamable HTTP without changing Python code.
+    command: ["fastmcp", "run", "mcp_server.py:mcp", "--transport", "http", "--host", "0.0.0.0", "--port", "8000"]
 
     env_file:
       - .env
+
+    ports:
+      - "8000:8000"
+
+  mcp-client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+    container_name: travel-mcp-client
+    command: ["python", "mcp_client.py"]
+    profiles: ["client"]
+
+    env_file:
+      - .env
+
+    depends_on:
+      - mcp-server
+
     stdin_open: true
     tty: true
