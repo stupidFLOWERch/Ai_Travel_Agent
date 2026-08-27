@@ -153,6 +153,40 @@ class MCPLangGraphAgent:
 
         return "\n".join(conversation)
 
+    def get_flight_tools(
+        self,
+        task_type: str
+    ):
+
+        tool_map = {
+
+            "multi_city": [
+                "search_multi_city_tool",
+                "search_airport_tool"
+            ],
+
+            "one_way": [
+                "search_flights_tool",
+                "search_airport_tool"
+            ],
+
+            "round_trip": [
+                "search_flights_tool",
+                "search_airport_tool"
+            ],
+
+            "cheapest": [
+                "cheapest_date_range_tool",
+                "search_airport_tool"
+            ],
+
+            "price_analysis": [
+                "analyze_price_insights_tool"
+            ]
+        }
+
+        return tool_map.get(task_type)
+
     # ------------------------------------------
     # Helper: Execute MCP Tool
     # ------------------------------------------
@@ -235,7 +269,7 @@ class MCPLangGraphAgent:
         system_instruction = """
         You are a Supervisor Agent for a travel assistant.
 
-        Your ONLY job is to route the user's request.
+        Your ONLY job is to analyze the user's request and break it into one or more tasks.
 
         Available specialist agents:
 
@@ -252,9 +286,9 @@ class MCPLangGraphAgent:
         3. weather
         - weather forecasts
 
-        For flight requests, you MUST also classify the task type.
 
-        Allowed flight task types:
+        For flight tasks, classify the task type as one of:
+
         - one_way
         - round_trip
         - multi_city
@@ -262,37 +296,91 @@ class MCPLangGraphAgent:
         - cheapest
         - price_analysis
 
+
         IMPORTANT:
+
         - Assume current year is 2026 if not provided.
         - Use the entire conversation history.
-        - Resolve references such as "there", "that place", "same date".
+        - Resolve references such as:
+        "there"
+        "that place"
+        "same date"
+        "same hotel"
+        "tomorrow"
+
         - Do NOT call tools.
-        - Do NOT answer the user's question.
-        - Rewrite the request into a complete self-contained request.
+        - Do NOT answer the user's request.
+        - Rewrite every task into a complete, self-contained request.
 
-        If the user has more than one flight segment with
-        different departure/arrival locations or dates,
-        classify it as "multi_city".
+        - A user request may contain multiple tasks.
+        - Multiple tasks may belong to different agents.
+        - Return ALL tasks.
 
-        For multi-city requests, the request MUST contain
-        all flight segments explicitly.
-
-        Return ONLY valid JSON.
-
-        Example multi-city:
+        Return ONLY valid JSON in this format:
 
         {
-            "agent": "flight",
-            "task_type": "multi_city",
-            "request": "Search a multi-city itinerary with these segments: KUL to BKI on 2026-08-29, then BKI to SBW on 2026-09-04."
+            "tasks": [
+                {
+                    "agent": "flight",
+                    "task_type": "one_way",
+                    "request": "Find a one-way flight from KUL to BKI on 2026-08-29."
+                }
+            ]
         }
 
-        Example one-way:
+
+        Example: multiple domains
+
+        User request:
+        "Find me a flight from KUL to Tokyo on 2026-09-01,
+        a hotel in Tokyo, and the weather there."
+
+        Return:
 
         {
-            "agent": "flight",
-            "task_type": "one_way",
-            "request": "Find a one-way flight from KUL to BKI on 2026-08-29."
+            "tasks": [
+                {
+                    "agent": "flight",
+                    "task_type": "one_way",
+                    "request": "Find a one-way flight from KUL to Tokyo on 2026-09-01."
+                },
+                {
+                    "agent": "hotel",
+                    "task_type": null,
+                    "request": "Find a hotel in Tokyo."
+                },
+                {
+                    "agent": "weather",
+                    "task_type": null,
+                    "request": "Provide the weather forecast for Tokyo."
+                }
+            ]
+        }
+
+
+        Example: multi-city flight
+
+        {
+            "tasks": [
+                {
+                    "agent": "flight",
+                    "task_type": "multi_city",
+                    "request": "Search a multi-city itinerary with these segments: KUL to BKI on 2026-08-29, then BKI to SBW on 2026-09-04."
+                }
+            ]
+        }
+
+
+        If the request is unrelated to flights, hotels, or weather:
+
+        {
+            "tasks": [
+                {
+                    "agent": "none",
+                    "task_type": null,
+                    "request": "I can only help with flights, hotels, and weather."
+                }
+            ]
         }
         """
 
@@ -316,24 +404,98 @@ class MCPLangGraphAgent:
 
         try:
             decision = json.loads(response.text)
-            allowed_agents = {"flight", "hotel", "weather", "none"}
 
-            if (
-                not isinstance(decision, dict)
-                or decision.get("agent") not in allowed_agents
-                or not decision.get("request")
-            ):
+            allowed_agents = {
+                "flight",
+                "hotel",
+                "weather",
+                "none"
+            }
+
+            valid = True
+
+            # Must be an object
+            if not isinstance(decision, dict):
+                valid = False
+
+            # Must contain tasks
+            elif not isinstance(decision.get("tasks"), list):
+                valid = False
+
+            # Must contain at least one task
+            elif len(decision["tasks"]) == 0:
+                valid = False
+
+            else:
+                for task in decision["tasks"]:
+
+                    if not isinstance(task, dict):
+                        valid = False
+                        break
+
+                    agent = task.get("agent")
+                    task_type = task.get("task_type")
+                    request = task.get("request")
+
+                    # Validate agent
+                    if agent not in allowed_agents:
+                        valid = False
+                        break
+
+                    # Validate request
+                    if not isinstance(request, str) or not request.strip():
+                        valid = False
+                        break
+
+                    # Flight must have a task_type
+                    if agent == "flight":
+
+                        allowed_task_types = {
+                            "one_way",
+                            "round_trip",
+                            "multi_city",
+                            "airport",
+                            "cheapest",
+                            "price_analysis"
+                        }
+
+                        if task_type not in allowed_task_types:
+                            valid = False
+                            break
+
+                    # Non-flight tasks should have no task_type
+                    else:
+
+                        if task_type is not None:
+                            valid = False
+                            break
+
+            if not valid:
                 decision = {
-                    "agent": "none",
-                    "request": "I can only help with flights, hotels, and weather."
+                    "tasks": [
+                        {
+                            "agent": "none",
+                            "task_type": None,
+                            "request": (
+                                "I can only help with "
+                                "flights, hotels, and weather."
+                            )
+                        }
+                    ]
                 }
+
         except json.JSONDecodeError:
             decision = {
-                "agent": "none",
-                "request": (
-                    "I can only help with "
-                    "flights, hotels, and weather."
-                )
+                "tasks": [
+                    {
+                        "agent": "none",
+                        "task_type": None,
+                        "request": (
+                            "I can only help with "
+                            "flights, hotels, and weather."
+                        )
+                    }
+                ]
             }
 
         print("\n🧭 Supervisor Decision:")
@@ -348,84 +510,64 @@ class MCPLangGraphAgent:
         return {
             "supervisor_decision": decision
         }
-        
-    async def flight_node(self, state: AgentState) -> AgentState:
+
+    async def dispatcher_node(
+        self,
+        state: AgentState
+    ) -> AgentState:
 
         decision = state["supervisor_decision"]
 
-        request = decision["request"]
-        task_type = decision.get("task_type")
+        tasks = decision.get("tasks", [])
 
-        if task_type == "multi_city":
+        results = []
 
-            result = await self.flight_agent.run(
-                request,
-                allowed_tool_names={
-                    "search_multi_city_tool"
-                }
-            )
+        for task in tasks:
 
-        else:
+            agent_name = task.get("agent")
+            task_type = task.get("task_type")
+            request = task.get("request")
 
-            result = await self.flight_agent.run(
-                request
-            )
+            if agent_name == "flight":
+
+                allowed_tools = self.get_flight_tools(
+                    task_type
+                )
+
+                result = await self.flight_agent.run(
+                    request,
+                    allowed_tool_names=allowed_tools
+                )
+
+            elif agent_name == "hotel":
+
+                result = await self.hotel_agent.run(
+                    request
+                )
+
+            elif agent_name == "weather":
+
+                result = await self.weather_agent.run(
+                    request
+                )
+
+            else:
+
+                result = (
+                    "I can only help with flights, "
+                    "hotels, and weather."
+                )
+
+            results.append(result)
 
         return {
             "messages": [
                 {
                     "role": "assistant",
-                    "content": result
+                    "content": "\n\n".join(results)
                 }
             ]
         }
-
-    async def hotel_node(self, state: AgentState) -> AgentState:
-        decision = state["supervisor_decision"]
-        request = decision["request"]
-
-        result = await self.hotel_agent.run(request)
-
-        return {
-            "messages": [
-                {
-                    "role": "assistant",
-                    "content": result
-                }
-            ]
-        }
-
-    async def weather_node(self, state: AgentState) -> AgentState:
-        decision = state["supervisor_decision"]
-        request = decision["request"]
-
-        result = await self.weather_agent.run(request)
-
-        return {
-            "messages": [
-                {
-                    "role": "assistant",
-                    "content": result
-                }
-            ]
-        }
-    
-    def route_agent(self, state: AgentState) -> str:
-
-        decision = state["supervisor_decision"]
-
-        agent = decision.get("agent")
-
-        if agent == "flight":
-            return "flight"
-
-        elif agent == "hotel":
-            return "hotel"
-
-        elif agent == "weather":
-            return "weather"
-
-        return "end"
 
     # ------------------------------------------
     # Build LangGraph Workflow
@@ -440,36 +582,23 @@ class MCPLangGraphAgent:
         )
 
         workflow.add_node(
-            "flight",
-            self.flight_node
+            "dispatcher",
+            self.dispatcher_node
         )
 
-        workflow.add_node(
-            "hotel",
-            self.hotel_node
+        workflow.set_entry_point(
+            "supervisor"
         )
 
-        workflow.add_node(
-            "weather",
-            self.weather_node
-        )
-
-        workflow.set_entry_point("supervisor")
-
-        workflow.add_conditional_edges(
+        workflow.add_edge(
             "supervisor",
-            self.route_agent,
-            {
-                "flight": "flight",
-                "hotel": "hotel",
-                "weather": "weather",
-                "end": END
-            }
+            "dispatcher"
         )
 
-        workflow.add_edge("flight", END)
-        workflow.add_edge("hotel", END)
-        workflow.add_edge("weather", END)
+        workflow.add_edge(
+            "dispatcher",
+            END
+        )
 
         memory = MemorySaver()
 
@@ -533,7 +662,6 @@ class MCPLangGraphAgent:
                     elif tool.name in WEATHER_TOOL_NAMES:
                         self.weather_tools.append(gemini_tool)
 
-
                 print(
                     f"✈️ Flight tools: "
                     f"{[t.function_declarations[0].name for t in self.flight_tools]}"
@@ -571,7 +699,6 @@ class MCPLangGraphAgent:
                     self.weather_tools,
                     self.call_tool
                 )
-
 
                 # Build Supervisor LangGraph
                 self.app = self.build_graph()
