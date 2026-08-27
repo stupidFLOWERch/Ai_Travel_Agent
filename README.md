@@ -25,65 +25,60 @@ The server exposes flight, hotel, airport, price analysis, and weather tools thr
 | `search_hotels_tool` | Search for hotels based on destination, dates, and preferences |
 | `get_weather_tool` | Retrieve weather information for a destination |
 ## 🏗️ Architecture
-
-The project follows the Model Context Protocol (MCP) architecture and integrates both custom-built APIs and third-party MCP servers.
-
 ```text
-┌─────────────────────────┐
-│          User           │
-│                         │
-│ "Find cheap flights     │
-│  from KL to Tokyo"      │
-└────────────┬────────────┘
-             │
-             ▼
-┌─────────────────────────┐
-│      AI Client / LLM    │
-│                         │
-│  Understands the user's │
-│  request and selects    │
-│  the appropriate tools  │
-└────────────┬────────────┘
-             │
-             │ MCP
-             ▼
-┌─────────────────────────────────────────┐
-│        AI Travel MCP Server             │
-│                                         │
-│  ┌───────────────────────────────────┐  │
-│  │        Custom APIs                │  │
-│  │                                   │  │
-│  │  search_flights                   │  │
-│  │  search_airport                   │  │
-│  │  search_multi_city                │  │
-│  │  analyze_price_insights           │  │
-│  │  cheapest_date_range              │  │
-│  │  get_weather                      │  │
-│  │                                   │  │
-│  │  Built and maintained by this     │  │
-│  │  project                          │  │
-│  └───────────────────────────────────┘  │
-│                                         │
-│  ┌───────────────────────────────────┐  │
-│  │     Integrated MCP Servers        │  │
-│  │                                   │  │
-│  │  search_hotels                    │  │
-│  │                                   │  │
-│  │  Provided by third-party MCP      │  │
-│  │  servers                          │  │
-│  └───────────────────────────────────┘  │
-└──────────────────┬──────────────────────┘
-                   │
-          ┌────────┴─────────┐
-          │                  │
-          ▼                  ▼
-┌──────────────────┐  ┌──────────────────────┐
-│  Custom APIs     │  │ Third-Party MCP      │
-│                  │  │ Servers              │
-│  SerpAPI         │  │                      │
-│  RapidAPI        │  │  Trivago             │
-│  Open-Meteo API  │  │                      │
-└──────────────────┘  └──────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                              User                                   │
+│                 "Find cheap flights from KL to Tokyo"               │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                               LLM                                   │
+│               Understands intent and selects tools                  │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      LangGraph Workflow                             │
+│                     (AI Agent Orchestrator)                         │
+│                                                                     │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │  Loop: Agent Node → Tool Node → Agent Node → ...            │   │
+│   │                                                             │   │
+│   │  1. Agent Node:  Decide which tool to call                  │   │
+│   │  2. Tool Node:   Execute tool via MCP Server                │   │
+│   │  3. Agent Node:  Process result, decide next step           │   │
+│   │  4. END:         When no more tools needed                  │   │
+│   └─────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+│        Understand  →    Search    →    Process  →   Suggest         │
+└────────────────────────────────┬────────────────────────────────────┘
+                                 │
+                                 │ MCP
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      AI Travel MCP Server                           │
+│                     (Tool Execution Layer)                          │
+│                                                                     │
+│   ┌─────────────────────────────────────────────────────────────┐   │
+│   │                       MCP Tools                             │   │
+│   │                                                             │   │
+│   │   search_flights                  analyze_price_insights    │   │
+│   │   search_airport                  cheapest_date_range       │   │ 
+│   │   search_multi_city               get_weather               │   │ 
+│   │   search_hotels (Trivago MCP)                               │   │ 
+│   │                                                             │   │
+│   └─────────────────────────────────────────────────────────────┘   │
+└──────────────────────────────────────┬──────────────────────────────┘
+                                       |
+          ┌────────────────────┬───────┴─────────┬─────────────────────┐
+          │                    │                 │                     |         
+          ▼                    ▼                 ▼                     ▼
+┌────────────────┐  ┌─────────────────┐  ┌──────────────────┐  ┌────────────────┐       
+│    SerpAPI     │  │    RapidAPI     │  │    Open-Meteo    │  |   Trivago MCP  |
+│   (Flights)    │  │   (Airports)    │  │       API        │  |    (Hotels)    |
+└────────────────┘  └─────────────────┘  │     (Weather)    │  └────────────────┘           
+                                         └──────────────────┘  
 ```
 ## Environment Variables (required)
 Create a `.env` file in the project root:

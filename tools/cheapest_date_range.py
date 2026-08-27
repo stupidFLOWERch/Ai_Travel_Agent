@@ -102,10 +102,10 @@ def cheapest_date_range(
         arrival_id=arrival_id,
         start_date=start_date,
         end_date=end_date,
-        duration=duration,          # ← 第5个参数
-        currency=currency,          # ← 第6个参数
-        travel_class=travel_class,  # ← 第7个参数
-        bags=bags,                  # ← 第8个参数
+        duration=duration,          
+        currency=currency,          
+        travel_class=travel_class,  
+        bags=bags,                  
     )
 
 

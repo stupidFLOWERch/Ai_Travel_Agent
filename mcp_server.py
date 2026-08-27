@@ -10,12 +10,27 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from dotenv import load_dotenv
 from fastmcp import FastMCP, Client
+from pydantic import BaseModel, Field
+from typing import List
 
 from tools.search_flights import search_flights, FlightType
 from tools.search_multi_city import search_multi_city
 from tools.cheapest_date_range import cheapest_date_range
 from tools.search_airport import search_airport
 from tools.price_advisor import analyze_price_insights
+
+class MultiCitySegment(BaseModel):
+    departure_id: str = Field(
+        description="Departure airport IATA code, e.g. KUL"
+    )
+
+    arrival_id: str = Field(
+        description="Arrival airport IATA code, e.g. BKI"
+    )
+
+    date: str = Field(
+        description="Flight departure date in YYYY-MM-DD format, e.g. 2026-08-29"
+    )
 
 logging.basicConfig(level=logging.WARNING)
 
@@ -114,14 +129,45 @@ def cheapest_date_range_tool(
 
 
 @mcp.tool()
-def search_multi_city_tool(segments: list, currency: str = "MYR") -> str:
-    """Search multi-city flights with multiple segments."""
-    try:
-        result = search_multi_city(segments=segments, currency=currency)
-        return json.dumps(result, indent=2, ensure_ascii=False, default=str)
-    except Exception as e:
-        return json.dumps({"error": str(e)}, indent=2)
+def search_multi_city_tool(
+    segments: List[MultiCitySegment],
+    currency: str = "MYR"
+) -> str:
 
+    """Search multi-city flights.
+
+    Each segment MUST contain:
+    - departure_id
+    - arrival_id
+    - date
+
+    The date field MUST be named "date".
+    Do NOT use outbound_date or departure_date.
+    """
+
+    try:
+        segments_data = [
+            segment.model_dump()
+            for segment in segments
+        ]
+
+        result = search_multi_city(
+            segments=segments_data,
+            currency=currency
+        )
+
+        return json.dumps(
+            result,
+            indent=2,
+            ensure_ascii=False,
+            default=str
+        )
+
+    except Exception as e:
+        return json.dumps(
+            {"error": str(e)},
+            indent=2
+        )
 
 @mcp.tool()
 def search_airport_tool(location: str) -> str:

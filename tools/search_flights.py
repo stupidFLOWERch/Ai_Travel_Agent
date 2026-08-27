@@ -232,7 +232,7 @@ def search_flights(
                     "outbound": outbound_data,
                     "return": return_options,
                     "total_price": total_price,
-                    "currency": currency_code,  # ✅ 添加货币
+                    "currency": currency_code,  
                 }
             )
 
@@ -245,7 +245,7 @@ def search_flights(
                 outbound_flight,
                 include_price=True
             )
-            outbound_data["currency"] = currency_code  # ✅ 添加货币
+            outbound_data["currency"] = currency_code  
             flight_results.append(outbound_data)
 
     # ---------------------------------------------------------
