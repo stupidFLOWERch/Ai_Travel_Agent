@@ -155,11 +155,13 @@ def analyze_price_insights(
         - advice: Purchase advice with price details
         - is_good_deal: Boolean indicating if it's a good deal
     """
-    try:
-        # Determine currency and symbol (ensure not None)
-        currency_code = currency if currency is not None else "MYR"
-        currency_symbol = CURRENCY_SYMBOLS.get(currency_code, currency_code)
+    # Determine currency and symbol (ensure not None)
+    currency_code = currency if currency is not None else "MYR"
+    # → "XYZ 1200"  (加空格更可读)
+    currency_symbol = CURRENCY_SYMBOLS.get(currency_code, f"{currency_code} ")
+    
 
+    try:
         # If return_date is provided, treat the search as round trip.
         if return_date is not None:
             flight_type = FlightType.ROUND_TRIP
@@ -289,19 +291,20 @@ def analyze_price_insights(
 
     except serpapi.SerpApiClientException as e:
         error_msg = str(e)
-        # Provide more user-friendly error messages
         if "400" in error_msg:
             return {
-                "currency": currency_code if currency else "MYR",
-                "currency_symbol": CURRENCY_SYMBOLS.get(currency_code, currency_code) if currency else "RM",
+                "currency": currency_code,              # ← 只用 currency_code
+                "currency_symbol": currency_symbol,     # ← 只用 currency_symbol
                 "error": f"Flight search failed. Please check that: 1) Dates are in the future and return_date is after outbound_date, 2) Airport codes are valid. Error: {error_msg}"
             }
         return {
-            "currency": currency_code if currency else "MYR",
+            "currency": currency_code,                  # ← 加上
+            "currency_symbol": currency_symbol,         # ← 加上（原本没有）
             "error": f"SerpAPI call failed: {error_msg}"
         }
     except Exception as e:
         return {
-            "currency": currency_code if currency else "MYR",
+            "currency": currency_code,                  # ← 只用 currency_code
+            "currency_symbol": currency_symbol,         # ← 加上
             "error": f"Analysis failed: {str(e)}"
         }

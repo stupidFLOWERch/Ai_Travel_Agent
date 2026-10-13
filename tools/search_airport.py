@@ -1,5 +1,7 @@
 import os
 import requests
+import sys
+
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -19,7 +21,7 @@ def search_airport(location: str):
     Returns:
         A list of matching airports.
     """
-    print(f"[TOOL] search_airport({location})")
+    print(f"[TOOL] search_airport({location})", file=sys.stderr)
 
     url = "https://aerodatabox.p.rapidapi.com/airports/search/term"
 

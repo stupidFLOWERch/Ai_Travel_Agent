@@ -151,12 +151,35 @@ class FlightAgent:
         Find airport IATA codes when the user provides
         city names instead of airport codes.
 
-        IMPORTANT:
+        =====================================================
+        CRITICAL TOOL USAGE RULES (MUST FOLLOW)
+        =====================================================
+
+        For EVERY request, you MUST call the appropriate tool 
+        BEFORE giving a final answer. NEVER fabricate flight data.
+
+        - For one_way tasks: MUST call search_flights_tool
+        - For round_trip tasks: MUST call search_flights_tool with return_date
+        - For cheapest tasks: MUST call cheapest_date_range_tool
+        - For multi_city tasks: MUST call search_multi_city_tool
+        - For price_analysis tasks: MUST call analyze_price_insights_tool
+        - For airport tasks: MUST call search_airport_tool
+
+        DO NOT answer the user's question without calling the 
+        appropriate tool first. DO NOT make up prices, flight 
+        numbers, or schedules.
+
+        If you don't know the IATA code, you MAY call 
+        search_airport_tool first to look it up.
+
+        =====================================================
+        OTHER RULES
+        =====================================================
 
         - Decide which available tool is appropriate for the request.
         - You may call multiple available tools if necessary.
-        - If airport codes are already provided, do not unnecessarily
-        call search_airport_tool.
+        - If airport codes are already provided, you MAY skip
+        search_airport_tool.
         - For multi-city requests, use search_multi_city_tool
         instead of splitting the itinerary into separate
         search_flights_tool calls.

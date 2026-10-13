@@ -1,5 +1,6 @@
 import os
 import serpapi
+import sys
 
 from enum import Enum
 from dotenv import load_dotenv
@@ -11,7 +12,7 @@ load_dotenv()
 SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY")
 
 client = serpapi.Client(
-api_key=SERPAPI_API_KEY
+    api_key=SERPAPI_API_KEY
 )
 
 class TravelClass(str, Enum):
@@ -49,37 +50,14 @@ def cheapest_date_range(
 ):  
     """
     MUST USE THIS TOOL FOR DATE RANGE SEARCHES 
-    
-    Use this when user says:
-    - "cheapest flight between DATE1 and DATE2"
-    - "cheapest round trip between DATE1 and DATE2, stay N days"
-    - "find cheapest date from DATE1 to DATE2"
-    - "find cheapest flight in MONTH"
-    
-    DO NOT use search_flights for date range searches!
-    
-    Args:
-        departure_id: IATA code for departure airport
-        arrival_id: IATA code for destination airport
-        start_date: Start date in YYYY-MM-DD format
-        end_date: End date in YYYY-MM-DD format
-        flight_type: "one_way" or "round_trip"
-        currency: Currency code (default: MYR)
-        travel_class: Travel class
-        duration: Number of days for round trip (required for round_trip)
-        bags: Number of checked bags
-    
-    Returns:
-        The cheapest flight option found in between the date range
+    ...
     """
     if duration is not None and duration > 0:
         flight_type = FlightType.ROUND_TRIP
 
-    # Default to one-way if not specified
     if flight_type is None:
         flight_type = FlightType.ONE_WAY
     
-    # For round trip, duration is required
     if flight_type == FlightType.ROUND_TRIP and duration is None:
         return {
             "error": "duration is required for round-trip cheapest date search"
@@ -98,16 +76,15 @@ def cheapest_date_range(
 
     elif flight_type == FlightType.ROUND_TRIP:
         return search_cheapest_round_trip(
-        departure_id=departure_id,
-        arrival_id=arrival_id,
-        start_date=start_date,
-        end_date=end_date,
-        duration=duration,          
-        currency=currency,          
-        travel_class=travel_class,  
-        bags=bags,                  
-    )
-
+            departure_id=departure_id,
+            arrival_id=arrival_id,
+            start_date=start_date,
+            end_date=end_date,
+            duration=duration,
+            currency=currency,
+            travel_class=travel_class,
+            bags=bags,
+        )
 
     return {
         "error": "Unsupported or missing flight type"
@@ -143,7 +120,7 @@ def search_cheapest_one_way(
     cheapest = None
     cheapest_date = None
     dates = generate_dates(start_date, end_date)
-    print(f"[TOOL] search_cheapest_oneway checking {len(dates)} outbound dates...")
+    print(f"[TOOL] search_cheapest_oneway checking {len(dates)} outbound dates...", file=sys.stderr)
     for date in dates:
         results = search_flights(
                 departure_id=departure_id,
@@ -191,21 +168,20 @@ def search_cheapest_round_trip(
     
     outbound_dates = generate_dates(start_date, end_date)
     
-    print(f"[TOOL] search_cheapest_round_trip checking {len(outbound_dates)} outbound dates...")
+    print(f"[TOOL] search_cheapest_round_trip checking {len(outbound_dates)} outbound dates...", file=sys.stderr)
     
     for outbound_date in outbound_dates:
-        # Calculate return date based on duration
         outbound_datetime = datetime.strptime(outbound_date, "%Y-%m-%d")
         return_datetime = outbound_datetime + timedelta(days=duration)
         return_date = return_datetime.strftime("%Y-%m-%d")
         
-        # Skip if return date is beyond end_date
         if return_datetime > datetime.strptime(end_date, "%Y-%m-%d"):
             continue
         
         print(
             f"[DEBUG] Calling search_flights: "
-            f"{outbound_date} -> {return_date}"
+            f"{outbound_date} -> {return_date}",
+            file=sys.stderr
         )
 
         try:
@@ -232,13 +208,12 @@ def search_cheapest_round_trip(
                     cheapest_return_date = return_date
                     
         except Exception as e:
-            print(f"[DEBUG] Error searching dates {outbound_date}->{return_date}: {e}")
+            print(f"[DEBUG] Error searching dates {outbound_date}->{return_date}: {e}", file=sys.stderr)
             continue
     
     if cheapest is None:
         return {"error": f"No round-trip flights found between {start_date} and {end_date}"}
     
-    # Extract outbound and return data separately
     cheapest["cheapest_outbound_date"] = (cheapest_outbound_date)
 
     cheapest["cheapest_return_date"] = (cheapest_return_date)

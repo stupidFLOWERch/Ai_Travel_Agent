@@ -13,15 +13,6 @@ load_dotenv()
 
 SERPAPI_API_KEY = os.getenv("SERPAPI_API_KEY")
 
-# Debug: Verify that the SerpApi API key is available when this module
-# is initialized. This helps diagnose environment variable issues,
-# especially when the MCP server is running as a subprocess.
-# print(
-#     f"[DEBUG] SERPAPI KEY exists={bool(SERPAPI_API_KEY)}, "
-#     f"length={len(SERPAPI_API_KEY) if SERPAPI_API_KEY else 0}",
-#     file=sys.stderr
-# )
-
 client = serpapi.Client(
     api_key=SERPAPI_API_KEY
 )
@@ -63,32 +54,8 @@ def search_flights(
 ):
     """
     This tool is for SPECIFIC DATE searches ONLY!
-    
-    If the user asks for:
-    - "cheapest flight in a range of date, did not clearly specific the exact outbound and return date"
-    DO NOT use this tool! Use cheapest_date_range instead!
-    
-    Args:
-        departure_id: IATA airport code for departure airport (e.g., "SBW")
-        arrival_id: IATA airport code for destination airport (e.g., "KUL")
-        outbound_date: Departure date in YYYY-MM-DD format (e.g., "2026-08-24")
-        flight_type: "round_trip" or "one_way"
-        currency: Currency code (e.g., "MYR", "USD")
-        travel_class: "economy", "premium_economy", "business", "first"
-        return_date: Return date in YYYY-MM-DD format (required for round_trip)
-        bags: Number of checked bags
-
-    Returns:
-        A list of flight results with currency information included.
+    ...
     """
-    # Debug: Verify that the API key is still available at runtime.
-    # This confirms that the MCP server subprocess has access to the environment variables passed from the MCP client.
-    # print(
-    #     f"[DEBUG] Runtime key exists={bool(os.getenv('SERPAPI_API_KEY'))}, "
-    #     f"length={len(os.getenv('SERPAPI_API_KEY', ''))}",
-    #     file=sys.stderr
-    # )
-
     print(
         f"[DEBUG] Client type={type(client)}",
         file=sys.stderr
@@ -96,36 +63,26 @@ def search_flights(
     print(
         f"[TOOL] search_flights("
         f"{departure_id} -> {arrival_id}, "
-        f"{outbound_date})"
+        f"{outbound_date})",
+        file=sys.stderr
     )
 
-    print(f"[DEBUG] return_date = {return_date}")
-    print(f"[DEBUG] original flight_type = {flight_type}")
+    print(f"[DEBUG] return_date = {return_date}", file=sys.stderr)
+    print(f"[DEBUG] original flight_type = {flight_type}", file=sys.stderr)
 
-    # ---------------------------------------------------------
     # 1. Determine the actual flight type
-    # ---------------------------------------------------------
-
-    # If return_date is provided, treat the search as round trip.
     if return_date is not None:
         flight_type = FlightType.ROUND_TRIP
-
-    # If no flight type is provided and there is no return date,
-    # default to one-way.
     elif flight_type is None:
         flight_type = FlightType.ONE_WAY
 
-    # If the user explicitly requested round trip but did not
-    # provide a return date, reject the request.
     if flight_type == FlightType.ROUND_TRIP and return_date is None:
         raise ValueError("return_date is required for round-trip flights.")
 
-    print(f"[DEBUG] final flight_type = {flight_type}")
-    print(f"[DEBUG] SerpApi type = {flight_type_map[flight_type.value]}")
+    print(f"[DEBUG] final flight_type = {flight_type}", file=sys.stderr)
+    print(f"[DEBUG] SerpApi type = {flight_type_map[flight_type.value]}", file=sys.stderr)
 
-    # ---------------------------------------------------------
     # 2. Build the initial SerpApi request parameters
-    # ---------------------------------------------------------
     currency_code = currency if currency is not None else "MYR"
 
     params = {
@@ -134,52 +91,40 @@ def search_flights(
         "arrival_id": arrival_id,
         "outbound_date": outbound_date,
         "type": flight_type_map[flight_type.value],
-        "currency": currency_code,  # ← 修复拼写错误
+        "currency": currency_code,
     }
 
-    # Add return date for round-trip searches.
     if return_date is not None:
         params["return_date"] = return_date
 
-    # Add travel class if provided.
     if travel_class is not None:
         params["travel_class"] = travel_class_map[travel_class.value]
 
-    # Add checked baggage count if provided.
     if bags is not None:
         params["bags"] = bags
 
-    print(f"[DEBUG] Initial API params = {params}")
+    print(f"[DEBUG] Initial API params = {params}", file=sys.stderr)
 
-    # ---------------------------------------------------------
     # 3. First API call
-    # ---------------------------------------------------------
-
     outbound_results = client.search(params)
 
-    print("[DEBUG] First API call completed.")
+    print("[DEBUG] First API call completed.", file=sys.stderr)
 
     outbound_flights = get_flights(outbound_results)
 
     if not outbound_flights:
-        print("[DEBUG] No outbound flights found.")
+        print("[DEBUG] No outbound flights found.", file=sys.stderr)
         return []
 
-    # ---------------------------------------------------------
     # 4. Process outbound flights
-    # ---------------------------------------------------------
-
     flight_results = []
 
     for outbound_flight in outbound_flights:
 
-        # -----------------------------------------------------
         # 5. Round-trip handling
-        # -----------------------------------------------------
-
         if flight_type == FlightType.ROUND_TRIP:
 
-            print("[DEBUG] ROUND TRIP detected.")
+            print("[DEBUG] ROUND TRIP detected.", file=sys.stderr)
 
             outbound_data = extract_flight_data(
                 outbound_flight,
@@ -189,29 +134,23 @@ def search_flights(
             total_price = outbound_flight["price"]
             departure_token = outbound_flight.get("departure_token")
 
-            print(f"[DEBUG] departure_token = {departure_token}")
+            print(f"[DEBUG] departure_token = {departure_token}", file=sys.stderr)
 
             if not departure_token:
-                print("[DEBUG] No departure_token found for this outbound flight.")
+                print("[DEBUG] No departure_token found for this outbound flight.", file=sys.stderr)
                 continue
 
-            # -------------------------------------------------
             # 6. Second API call
-            # -------------------------------------------------
-
             return_params = params.copy()
             return_params["departure_token"] = departure_token
 
-            print(f"[DEBUG] Second API params = {return_params}")
+            print(f"[DEBUG] Second API params = {return_params}", file=sys.stderr)
 
             return_results = client.search(return_params)
 
-            print("[DEBUG] Return API call completed.")
+            print("[DEBUG] Return API call completed.", file=sys.stderr)
 
-            # -------------------------------------------------
             # 7. Extract return flight options
-            # -------------------------------------------------
-
             return_flights = get_flights(return_results)
 
             return_options = []
@@ -223,35 +162,26 @@ def search_flights(
                 )
                 return_options.append(return_data)
 
-            # -------------------------------------------------
             # 8. Combine outbound + return (with currency)
-            # -------------------------------------------------
-
             flight_results.append(
                 {
                     "outbound": outbound_data,
                     "return": return_options,
                     "total_price": total_price,
-                    "currency": currency_code,  
+                    "currency": currency_code,
                 }
             )
 
-        # -----------------------------------------------------
         # 9. One-way / other flight types
-        # -----------------------------------------------------
-
         else:
             outbound_data = extract_flight_data(
                 outbound_flight,
                 include_price=True
             )
-            outbound_data["currency"] = currency_code  
+            outbound_data["currency"] = currency_code
             flight_results.append(outbound_data)
 
-    # ---------------------------------------------------------
     # 10. Return final results
-    # ---------------------------------------------------------
-
-    print(f"[DEBUG] Total flight results = {len(flight_results)}")
+    print(f"[DEBUG] Total flight results = {len(flight_results)}", file=sys.stderr)
 
     return flight_results

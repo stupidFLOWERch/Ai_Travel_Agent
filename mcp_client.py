@@ -70,7 +70,9 @@ class MCPLangGraphAgent:
         self.flight_agent = None
         self.hotel_agent = None
         self.weather_agent = None
-        self.app = None                      # Compiled LangGraph app (built later)
+        self.app = None   
+        
+        self.trace = []                    # Compiled LangGraph app (built later)
 
     # ------------------------------------------
     # Helper: Clean JSON Schema for Gemini
@@ -181,7 +183,8 @@ class MCPLangGraphAgent:
             ],
 
             "price_analysis": [
-                "analyze_price_insights_tool"
+                "analyze_price_insights_tool",
+                "search_airport_tool"
             ]
         }
 
@@ -207,6 +210,12 @@ class MCPLangGraphAgent:
 
             print(f"\n🔧 Calling tool: {tool_name}")
             print(f"📝 Final Parameters: {json.dumps(args, indent=2, ensure_ascii=False)}")
+
+            self.trace.append({
+                "type": "tool_call",
+                "tool_name": tool_name,
+                "args": args,
+            })
 
             result = await self.mcp_session.call_tool(tool_name, args)
             
@@ -296,6 +305,11 @@ class MCPLangGraphAgent:
         - cheapest
         - price_analysis
 
+        CHEAPEST TASK CLASSIFICATION:
+
+        - task_type="cheapest" is ONLY for date ranges (2+ dates).
+        - If user ask cheapest with single date → task_type="one_way"
+        - If user ask cheapest with date range → task_type="cheapest"
 
         IMPORTANT:
 
@@ -507,6 +521,11 @@ class MCPLangGraphAgent:
             )
         )
 
+        self.trace.append({
+            "type": "supervisor",
+            "decision": decision,
+        })
+
         return {
             "supervisor_decision": decision
         }
@@ -610,13 +629,18 @@ class MCPLangGraphAgent:
     # Main Entry Point
     # ------------------------------------------
     async def run(self):
+        """Interactive entry point."""
+        try:
+            await self.setup()
+            await self.chat_loop()
+        finally:
+            await self.teardown()
+            
+    async def setup(self):
         """
-        Main entry point: connect to MCP, build graph, start chat loop.
+        Connect to MCP, load tools, create agents, build graph.
+        Call this once before querying.
         """
-        # Connect to MCP Server
-        # Pass the current process environment to the MCP server subprocess.
-        # This ensures that environment variables such as API keys are available
-        # inside the MCP server when running locally or inside Docker.
         server_params = StdioServerParameters(
             command="python",
             args=["mcp_server.py"],
@@ -624,92 +648,81 @@ class MCPLangGraphAgent:
         )
         print("🔄 Connecting to MCP Server...")
 
-        async with stdio_client(server_params) as (read, write):
-            async with ClientSession(read, write) as session:
-                self.mcp_session = session
-                await session.initialize()
+        # 注意：stdio_client 是 async context manager
+        # 我们需要让它保持 open，所以不能用 `async with`
+        # 要用 `__aenter__` / `__aexit__` 手动管理
 
-                # Load MCP tools
-                tools = await session.list_tools()
+        self._stdio_ctx = stdio_client(server_params)
+        read, write = await self._stdio_ctx.__aenter__()
 
-                # Convert MCP tools to Gemini format
-                self.flight_tools = []
-                self.hotel_tools = []
-                self.weather_tools = []
+        self._session_ctx = ClientSession(read, write)
+        session = await self._session_ctx.__aenter__()
 
-                for tool in tools.tools:
+        self.mcp_session = session
+        await session.initialize()
 
-                    parameters = self.clean_schema(
-                        tool.inputSchema.copy()
-                    )
+        # Load MCP tools
+        tools = await session.list_tools()
 
-                    function_decl = types.FunctionDeclaration(
-                        name=tool.name,
-                        description=tool.description,
-                        parameters=parameters
-                    )
+        self.flight_tools = []
+        self.hotel_tools = []
+        self.weather_tools = []
 
-                    gemini_tool = types.Tool(
-                        function_declarations=[function_decl]
-                    )
+        for tool in tools.tools:
+            parameters = self.clean_schema(tool.inputSchema.copy())
 
-                    if tool.name in FLIGHT_TOOL_NAMES:
-                        self.flight_tools.append(gemini_tool)
+            function_decl = types.FunctionDeclaration(
+                name=tool.name,
+                description=tool.description,
+                parameters=parameters
+            )
 
-                    elif tool.name in HOTEL_TOOL_NAMES:
-                        self.hotel_tools.append(gemini_tool)
+            gemini_tool = types.Tool(
+                function_declarations=[function_decl]
+            )
 
-                    elif tool.name in WEATHER_TOOL_NAMES:
-                        self.weather_tools.append(gemini_tool)
+            if tool.name in FLIGHT_TOOL_NAMES:
+                self.flight_tools.append(gemini_tool)
+            elif tool.name in HOTEL_TOOL_NAMES:
+                self.hotel_tools.append(gemini_tool)
+            elif tool.name in WEATHER_TOOL_NAMES:
+                self.weather_tools.append(gemini_tool)
 
-                print(
-                    f"✈️ Flight tools: "
-                    f"{[t.function_declarations[0].name for t in self.flight_tools]}"
-                )
+        print(f"✈️ Flight tools: {[t.function_declarations[0].name for t in self.flight_tools]}")
+        print(f"🏨 Hotel tools: {[t.function_declarations[0].name for t in self.hotel_tools]}")
+        print(f"🌤️ Weather tools: {[t.function_declarations[0].name for t in self.weather_tools]}")
 
-                print(
-                    f"🏨 Hotel tools: "
-                    f"{[t.function_declarations[0].name for t in self.hotel_tools]}"
-                )
+        # Create Specialist Agents
+        self.flight_agent = FlightAgent(
+            self.gemini_client,
+            self.flight_tools,
+            self.call_tool
+        )
+        self.hotel_agent = HotelAgent(
+            self.gemini_client,
+            self.hotel_tools,
+            self.call_tool
+        )
+        self.weather_agent = WeatherAgent(
+            self.gemini_client,
+            self.weather_tools,
+            self.call_tool
+        )
 
-                print(
-                    f"🌤️ Weather tools: "
-                    f"{[t.function_declarations[0].name for t in self.weather_tools]}"
-                )
+        # Build Supervisor LangGraph
+        self.app = self.build_graph()
 
-
-                # ==========================================
-                # Create Specialist Agents
-                # ==========================================
-
-                self.flight_agent = FlightAgent(
-                    self.gemini_client,
-                    self.flight_tools,
-                    self.call_tool
-                )
-
-                self.hotel_agent = HotelAgent(
-                    self.gemini_client,
-                    self.hotel_tools,
-                    self.call_tool
-                )
-
-                self.weather_agent = WeatherAgent(
-                    self.gemini_client,
-                    self.weather_tools,
-                    self.call_tool
-                )
-
-                # Build Supervisor LangGraph
-                self.app = self.build_graph()
-
-                await self.chat_loop()
+    async def teardown(self):
+        """Close MCP connection."""
+        if self._session_ctx:
+            await self._session_ctx.__aexit__(None, None, None)
+        if self._stdio_ctx:
+            await self._stdio_ctx.__aexit__(None, None, None)
 
     # ------------------------------------------
     # Chat Loop
     # ------------------------------------------
     async def chat_loop(self):
-
         print("\n🤖 Travel Assistant started!")
         print("Enter 'exit' to quit\n")
         print("-" * 50)
@@ -721,7 +734,6 @@ class MCPLangGraphAgent:
         }
 
         while True:
-
             user_input = input("\nYou: ").strip()
 
             if user_input.lower() in ["exit", "quit"]:
@@ -732,41 +744,99 @@ class MCPLangGraphAgent:
                 continue
 
             try:
-
-                final_state = await self.app.ainvoke(
-                    {
-                        "messages": [
-                            {
-                                "role": "user",
-                                "content": user_input
-                            }
-                        ]
-                    },
-                    config
-                )
-
-                # Get latest assistant response
-                for msg in reversed(final_state["messages"]):
-
-                    if isinstance(msg, dict):
-                        role = msg.get("role")
-                        content = msg.get("content")
-
-                    else:
-                        role = getattr(msg, "type", None)
-                        content = getattr(msg, "content", None)
-
-                    if role in ("assistant", "ai") and content:
-                        print(f"\n🤖 {content}")
-                        break
+                result = await self.query(user_input)
+                print(f"\n🤖 {result['final_answer']}")
 
             except Exception as e:
-
                 print(f"\n❌ Error: {e}")
-
                 import traceback
                 traceback.print_exc()
 
+    async def query(self, user_input: str, thread_id: str = "eval") -> dict:
+        """
+        Programmatic entry point for evaluation.
+
+        Args:
+            user_input: User query string
+            thread_id: Thread ID for LangGraph checkpointer
+                       (use fixed "eval" for evaluation to avoid cross-contamination)
+
+        Returns:
+            {
+                "supervisor": {...},          # supervisor decision
+                "tool_calls": [...],          # tool calls agent made
+                "final_answer": "..."         # agent's final response
+            }
+        """
+        # Reset trace for this query
+        self.trace = []
+
+        config = {
+            "configurable": {
+                "thread_id": thread_id
+            }
+        }
+
+        final_state = await self.app.ainvoke(
+            {
+                "messages": [
+                    {
+                        "role": "user",
+                        "content": user_input
+                    }
+                ]
+            },
+            config
+        )
+
+        # Extract supervisor decision from trace
+        supervisor = next(
+            (t["decision"] for t in self.trace if t["type"] == "supervisor"),
+            None
+        )
+
+        # Extract tool calls from trace
+        tool_calls = [
+            {"tool_name": t["tool_name"], "args": t["args"]}
+            for t in self.trace
+            if t["type"] == "tool_call"
+        ]
+
+        # ← 加这个
+        for tc in tool_calls:
+            if tc["tool_name"] == "search_flights_tool":
+                print(f"DEBUG flight call args type: {type(tc['args'])}")
+                print(f"DEBUG flight call args: {tc['args']}")
+                print(f"DEBUG flight_type value: {tc['args'].get('flight_type')}")
+                print(f"DEBUG flight_type type: {type(tc['args'].get('flight_type'))}")
+                break
+
+        # Extract final answer from messages
+        final_answer = None
+        for msg in reversed(final_state["messages"]):
+            if isinstance(msg, dict):
+                role = msg.get("role")
+                content = msg.get("content")
+            else:
+                role = getattr(msg, "type", None)
+                content = getattr(msg, "content", None)
+
+            if role in ("assistant", "ai") and content:
+                final_answer = content
+                break
+
+        print("\n=== TOOL CALLS EXTRACTED ===")
+        print(f"trace length: {len(self.trace)}")
+        for t in self.trace:
+            print(f"  type={t.get('type')}, tool_name={t.get('tool_name')}, args type={type(t.get('args'))}")
+        print(f"tool_calls: {tool_calls}")
+        print("=" * 30)
+
+        return {
+            "supervisor": supervisor,
+            "tool_calls": tool_calls,
+            "final_answer": final_answer,
+        }
 # ==========================================
 # Entry Point
 # ==========================================

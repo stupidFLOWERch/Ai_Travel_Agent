@@ -1,6 +1,7 @@
 import os
 import json
 import serpapi
+import sys
 
 from enum import Enum
 from dotenv import load_dotenv
@@ -44,7 +45,7 @@ def search_multi_city(
     if not segments:
         raise ValueError("At least one segment is required.")
 
-    print(f"[TOOL] search_multi_city({len(segments)} segments)")
+    print(f"[TOOL] search_multi_city({len(segments)} segments)", file=sys.stderr)
 
     multi_city_json = json.dumps(segments)
 
@@ -61,22 +62,21 @@ def search_multi_city(
     if bags is not None:
         params["bags"] = bags
 
-    print(f"[DEBUG] Initial API params = {params}")
+    print(f"[DEBUG] Initial API params = {params}", file=sys.stderr)
 
     results = client.search(params)
-    print("[DEBUG] First multi-city API call completed.")
+    print("[DEBUG] First multi-city API call completed.", file=sys.stderr)
 
     current_flights = get_flights(results)
 
     if not current_flights:
-        print("[DEBUG] No multi-city flights found.")
+        print("[DEBUG] No multi-city flights found.", file=sys.stderr)
         return []
 
-    # 🔥 第一航段按价格排序，取最便宜的
     current_flights.sort(key=lambda x: x.get("price", 999999))
     MAX_FIRST_FLIGHTS = 3
     current_flights = current_flights[:MAX_FIRST_FLIGHTS]
-    print(f"[DEBUG] Limited to {len(current_flights)} cheapest first flights")
+    print(f"[DEBUG] Limited to {len(current_flights)} cheapest first flights", file=sys.stderr)
 
     itinerary_results = []
 
@@ -92,31 +92,29 @@ def search_multi_city(
         for segment_index in range(1, len(segments)):
             departure_token = current_flight.get("departure_token")
             if not departure_token:
-                print("[DEBUG] No departure_token found.")
+                print("[DEBUG] No departure_token found.", file=sys.stderr)
                 is_complete = False
                 break
 
             next_params = params.copy()
             next_params["departure_token"] = departure_token
 
-            print(f"[DEBUG] Next segment API params = {next_params}")
+            print(f"[DEBUG] Next segment API params = {next_params}", file=sys.stderr)
             next_results = client.search(next_params)
-            print("[DEBUG] Next segment API call completed.")
+            print("[DEBUG] Next segment API call completed.", file=sys.stderr)
 
             next_flights = get_flights(next_results)
 
             if not next_flights:
-                print("[DEBUG] No flights found for next segment.")
+                print("[DEBUG] No flights found for next segment.", file=sys.stderr)
                 is_complete = False
                 break
 
-            # 🔥 按价格排序，取最便宜的 2 个
             next_flights.sort(key=lambda x: x.get("price", 999999))
             MAX_FLIGHTS_PER_SEGMENT = 2
             next_flights = next_flights[:MAX_FLIGHTS_PER_SEGMENT]
-            print(f"[DEBUG] Limited to {len(next_flights)} cheapest flights for segment {segment_index + 1}")
+            print(f"[DEBUG] Limited to {len(next_flights)} cheapest flights for segment {segment_index + 1}", file=sys.stderr)
 
-            # 🔥 取最便宜的那个
             next_flight = next_flights[0]
 
             next_segment_data = extract_flight_data(next_flight, include_price=False)
@@ -133,13 +131,11 @@ def search_multi_city(
                 "total_price": total_price,
             })
 
-            # 🔥 找到 3 个就停止
             if len(itinerary_results) >= 3:
-                print("[DEBUG] Reached 3 complete itineraries, stopping")
+                print("[DEBUG] Reached 3 complete itineraries, stopping", file=sys.stderr)
                 break
 
-    # 🔥 按总价排序
     itinerary_results.sort(key=lambda x: x.get("total_price", 999999))
 
-    print(f"[DEBUG] Total multi-city itineraries = {len(itinerary_results)}")
+    print(f"[DEBUG] Total multi-city itineraries = {len(itinerary_results)}", file=sys.stderr)
     return itinerary_results
