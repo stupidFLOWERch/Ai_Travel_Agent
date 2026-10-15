@@ -261,6 +261,18 @@ class MCPLangGraphAgent:
                 "error": f"{type(e).__name__}: {str(e)}"
         }
 
+    async def _call_gemini_with_retry(self, func, max_retries=3):
+        for attempt in range(max_retries):
+            try:
+                return await func()
+            except Exception as e:
+                if "503" in str(e) and attempt < max_retries - 1:
+                    wait = 2 ** attempt
+                    print(f"⚠️ Gemini 503, retrying in {wait}s...")
+                    await asyncio.sleep(wait)
+                    continue
+                raise
+
     # ------------------------------------------
     # LangGraph Node 1: supervisor_node decision
     # ------------------------------------------
@@ -268,7 +280,7 @@ class MCPLangGraphAgent:
         self,
         state: AgentState
     ) -> AgentState:
-
+        print("\n🔵 supervisor_node called")
         recent_messages = state["messages"][-10:]
 
         conversation = self.format_conversation(
@@ -397,10 +409,11 @@ class MCPLangGraphAgent:
             ]
         }
         """
-
-        response = self.gemini_client.models.generate_content(
-            model="gemini-3.5-flash-lite",
-            contents=[
+        response = await self._call_gemini_with_retry(
+            lambda: asyncio.to_thread(
+                self.gemini_client.models.generate_content,
+                model="gemini-3.1-flash-lite",
+                contents=[
                 types.Content(
                     role="user",
                     parts=[
@@ -410,9 +423,10 @@ class MCPLangGraphAgent:
                     ]
                 )
             ],
-            config=types.GenerateContentConfig(
-                system_instruction=system_instruction,
-                response_mime_type="application/json"
+                config=types.GenerateContentConfig(
+                    system_instruction=system_instruction,
+                    response_mime_type="application/json"
+                )
             )
         )
 
@@ -534,7 +548,7 @@ class MCPLangGraphAgent:
         self,
         state: AgentState
     ) -> AgentState:
-
+        print("\n🟢 dispatcher_node called")
         decision = state["supervisor_decision"]
 
         tasks = decision.get("tasks", [])
