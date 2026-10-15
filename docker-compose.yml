@@ -15,14 +15,13 @@ services:
     ports:
       - "8000:8000"
 
-  mcp-client:
+  chainlit-ui:
     build:
       context: .
       dockerfile: Dockerfile
 
-    container_name: travel-mcp-client
-    command: ["python", "mcp_client.py"]
-    profiles: ["client"]
+    container_name: travel-chainlit-ui
+    command: ["chainlit", "run", "app.py", "--host", "0.0.0.0", "--port", "8080"]
 
     env_file:
       - .env
@@ -30,5 +29,6 @@ services:
     depends_on:
       - mcp-server
 
-    stdin_open: true
-    tty: true
+    ports:
+      - "8080:8080"
+

@@ -1,19 +1,29 @@
-# ✈️ AI Travel MCP Server
+# ✈️ AI Travel Agent
 
-An MCP (Model Context Protocol) server that provides travel-related tools for AI assistants and LLM-powered applications.
+A multi-agent AI travel assistant that helps users plan trips through natural conversation.
 
-The server exposes flight, hotel, airport, price analysis, and weather tools through the MCP protocol, allowing compatible AI clients to dynamically discover and use these tools for travel planning.
-
+The system uses a Supervisor architecture with three specialist agents (flight, hotel, weather) and integrates with external APIs through the MCP protocol. It includes a Chainlit-based web UI and can also be used as a standalone MCP server.
 
 ## 📦 Tech Stack
 
-- Python 3.11+
-- FastMCP
-- SerpApi (Google Flights)
+**Core**
+- Python 3.12
+- FastMCP (MCP Server)
+- LangGraph (Multi-Agent Orchestration)
+- Google Gemini (LLM)
+
+**APIs / Data Sources**
+- SerpAPI / Google Flights (Flight Search)
 - RapidAPI / AeroDataBox (Airport Search)
 - Open-Meteo (Weather, no API key required)
-- Trivago MCP (Hotels)
+- Trivago MCP (Hotel Search)
+
+**Frontend**
+- Chainlit (Web Chat UI)
+
 ## 🛠️ Available Tools
+
+The tools are distributed across three specialist agents:
 
 | Tool | Description |
 |---|---|
@@ -24,6 +34,7 @@ The server exposes flight, hotel, airport, price analysis, and weather tools thr
 | `analyze_price_insights_tool` | Analyze flight prices and determine whether a fare is relatively cheap or expensive |
 | `search_hotels_tool` | Search for hotels based on destination, dates, and preferences |
 | `get_weather_tool` | Retrieve weather information for a destination |
+
 ## 🏗️ Architecture
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
@@ -33,53 +44,53 @@ The server exposes flight, hotel, airport, price analysis, and weather tools thr
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                               LLM                                   │
-│               Understands intent and selects tools                  │
+│                       Chainlit Web UI                               │
+│                  (Browser-based Chat Interface)                     │
 └────────────────────────────────┬────────────────────────────────────┘
                                  │
                                  ▼
 ┌─────────────────────────────────────────────────────────────────────┐
-│                      LangGraph Workflow                             │
-│                     (AI Agent Orchestrator)                         │
+│                     Supervisor Node                                 │
 │                                                                     │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │  Loop: Agent Node → Tool Node → Agent Node → ...            │   │
-│   │                                                             │   │
-│   │  1. Agent Node:  Decide which tool to call                  │   │
-│   │  2. Tool Node:   Execute tool via MCP Server                │   │
-│   │  3. Agent Node:  Process result, decide next step           │   │
-│   │  4. END:         When no more tools needed                  │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-│                                                                     │
-│        Understand  →    Search    →    Process  →   Suggest         │
+│             Analyzes request → breaks into tasks                    │
+│             Outputs: {"tasks": [...]}                               │
+│             No tool calls — routing only                            │
 └────────────────────────────────┬────────────────────────────────────┘
                                  │
-                                 │ MCP
                                  ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Dispatcher Node                                 │
+│                                                                     │
+│             Routes each task to the right agent                     │
+│             Controls which tools each agent can use                 │
+└─────────────────────────────────────────┬───────────────────────────┘
+                                          │
+        ┌─────────────────────────────────┼────────────────────────┐
+        │                                 │                        │
+        ▼                                 ▼                        ▼
+┌────────────────────────┐        ┌────────────────┐        ┌───────────────┐
+│  FlightAgent           │        │  HotelAgent    │        │ WeatherAgent  │
+│  (5 tools)             │        │  (1 tool)      │        │  (1 tool)     │
+│                        │        │                │        │               │
+│ search_flights         │        │ search_hotels  │        │ get_weather   │
+│ search_multi_city      │        │ (Trivago MCP)  │        │ (Open-Meteo)  │
+│ cheapest_date_range    │        │                │        │               │
+│ analyze_price_insights |        │                │        │               │
+│ search_airport         │        │                │        │               │
+└───────┬────────────────┘        └───────┬────────┘        └───────┬───────┘
+        │                                 │                         │
+        └─────────────────────────────────┼─────────────────────────┘
+                                          │
+                                          │ MCP
+                                          ▼
 ┌─────────────────────────────────────────────────────────────────────┐
 │                      AI Travel MCP Server                           │
 │                     (Tool Execution Layer)                          │
 │                                                                     │
-│   ┌─────────────────────────────────────────────────────────────┐   │
-│   │                       MCP Tools                             │   │
-│   │                                                             │   │
-│   │   search_flights                  analyze_price_insights    │   │
-│   │   search_airport                  cheapest_date_range       │   │ 
-│   │   search_multi_city               get_weather               │   │ 
-│   │   search_hotels (Trivago MCP)                               │   │ 
-│   │                                                             │   │
-│   └─────────────────────────────────────────────────────────────┘   │
-└──────────────────────────────────────┬──────────────────────────────┘
-                                       |
-          ┌────────────────────┬───────┴─────────┬─────────────────────┐
-          │                    │                 │                     |         
-          ▼                    ▼                 ▼                     ▼
-┌────────────────┐  ┌─────────────────┐  ┌──────────────────┐  ┌────────────────┐       
-│    SerpAPI     │  │    RapidAPI     │  │    Open-Meteo    │  |   Trivago MCP  |
-│   (Flights)    │  │   (Airports)    │  │       API        │  |    (Hotels)    |
-└────────────────┘  └─────────────────┘  │     (Weather)    │  └────────────────┘           
-                                         └──────────────────┘  
+│   FastMCP → SerpAPI | RapidAPI | Open-Meteo | Trivago MCP           │
+└─────────────────────────────────────────────────────────────────────┘
 ```
+
 ## Environment Variables (required)
 Create a `.env` file in the project root:
 ```bash
@@ -92,8 +103,9 @@ RAPIDAPI_KEY=your_rapidapi_key
 | Gemini API | Google AI Studio |
 | SerpApi | SerpApi.com |
 | RapidAPI | RapidAPI / AeroDataBox |
+
 ## 🚀 How to Run
-## Option 1: Local Python
+## Option 1: Local Python with Web UI
 
 ### 1. Clone this repo
 ```bash
@@ -112,29 +124,40 @@ venv/Scripts/activate
 pip install -r requirements.txt
 ```
 
-### 4. Start the mcp server (stdio mode)
+### 4. Start the Chainlit web UI
 ```bash
+chainlit run app.py
+```
+
+## Option 2: MCP Server Only (for Cursor / Claude Desktop)
+``` bash
 python mcp_server.py
 ```
-
-### 5. In another terminal, start the chat client (optional)
-```bash
-python mcp_client.py
+Then configure in Cursor:
+``` bash
+{
+  "mcpServers": {
+    "travel-agent": {
+      "command": "python",
+      "args": ["mcp_server.py"]
+    }
+  }
+}
 ```
 
-## Option 2: Docker
+## Option 3: Docker
 
 ### 1. Build the image
 ``` bash
 docker compose build
 ```
 
-### 2. Start the MCP server (HTTP mode, port 8000)
+### 2. Start the MCP Server + Chainlit UI
 ``` bash
 docker compose up
 ```
 
-### 3. Start the chat client (optional)
+### 3. Start the MCP Server only
 ``` bash
-docker compose --profile client run mcp-client
+docker compose up mcp-server
 ```
